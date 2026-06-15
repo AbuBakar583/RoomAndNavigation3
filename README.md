@@ -1,5 +1,10 @@
 # RoomAndNavigation3
 
+![Kotlin Multiplatform](https://img.shields.io/badge/Kotlin-Multiplatform-7F52FF?logo=kotlin&logoColor=white)
+![Compose Multiplatform](https://img.shields.io/badge/Compose-Multiplatform-4285F4)
+![Room 3](https://img.shields.io/badge/Room-3.0.0--alpha06-3DDC84)
+![Platforms](https://img.shields.io/badge/Platforms-Android%20%7C%20iOS%20%7C%20Desktop%20%7C%20JS%20%7C%20Wasm-blue)
+
 This project is a Kotlin Multiplatform app that shows:
 
 - Navigation with `Navigation3`
@@ -98,6 +103,27 @@ The flow in this project is:
 Then Room emits `Flow<List<NoteEntity>>` back to the UI.
 
 That is why the list updates by itself when you add, edit, or delete.
+
+## Architecture Diagram
+
+```mermaid
+flowchart LR
+    A["Android MainActivity"] --> UI["App + Navigation3"]
+    I["iOS MainViewController"] --> UI
+    D["Desktop main.kt"] --> UI
+    W["Web main.kt"] --> UI
+
+    UI --> SA["ScreenA"]
+    SA --> SM["NotesScreenModel"]
+    SM --> REPO["NotesRepository"]
+    REPO --> DAO["NoteDao"]
+    DAO --> DB["AppDatabase"]
+
+    DB --> AD["Android BundledSQLiteDriver"]
+    DB --> ID["iOS BundledSQLiteDriver"]
+    DB --> JD["Desktop BundledSQLiteDriver"]
+    DB --> WD["WebWorkerSQLiteDriver"]
+```
 
 ## Step By Step: Build This Project From Zero
 
@@ -567,7 +593,31 @@ ComposeViewport {
 }
 ```
 
-## Run Commands
+## Run The Project
+
+### Android Studio
+
+1. Open the root folder: [RoomAndNavigation3](/Users/abubakar/Downloads/RoomAndNavigation3)
+2. Wait for Gradle sync to finish.
+3. If Android Studio asks for a JDK, use `JDK 17`.
+4. Select the `androidApp` run configuration. If it is missing, open [MainActivity.kt](/Users/abubakar/Downloads/RoomAndNavigation3/androidApp/src/main/kotlin/org/roomnav/project/MainActivity.kt) and run it from the gutter.
+5. Start an emulator or connect a real Android device.
+6. Press `Run`.
+
+### Xcode
+
+1. Open [iosApp/iosApp.xcodeproj](/Users/abubakar/Downloads/RoomAndNavigation3/iosApp/iosApp.xcodeproj).
+2. Select the `iosApp` scheme.
+3. Pick an iPhone simulator such as `iPhone 16`.
+4. Press `Run`.
+5. The Xcode build phase will call `./gradlew :shared:embedAndSignAppleFrameworkForXcode` for you.
+6. If the first launch fails because the Kotlin framework is not ready yet, run:
+
+```bash
+./gradlew :shared:compileKotlinIosSimulatorArm64
+```
+
+and then press `Run` again in Xcode.
 
 ### Web JS
 
@@ -615,6 +665,14 @@ Run the desktop entry:
 ./gradlew :desktopApp:run
 ```
 
+### iOS From Terminal
+
+If you only want to confirm the shared iOS code compiles:
+
+```bash
+./gradlew :shared:compileKotlinIosSimulatorArm64
+```
+
 ## What You Should See
 
 When everything is working:
@@ -652,6 +710,109 @@ If you want to explain this project to a child, say it like this:
 - dev server headers help the browser allow OPFS features
 - if OPFS is not available, the worker fallback keeps the app alive
 
+## Common Mistakes And Fixes
+
+### 1. `Plugin [id: 'androidx.room3'] was not found`
+
+Add the plugin at the root in [build.gradle.kts](/Users/abubakar/Downloads/RoomAndNavigation3/build.gradle.kts):
+
+```kotlin
+id("androidx.room3") version "3.0.0-alpha06" apply false
+```
+
+Then apply it in [shared/build.gradle.kts](/Users/abubakar/Downloads/RoomAndNavigation3/shared/build.gradle.kts):
+
+```kotlin
+id("androidx.room3")
+```
+
+### 2. `The Room Gradle plugin was applied but no schema location was specified`
+
+Add this in [shared/build.gradle.kts](/Users/abubakar/Downloads/RoomAndNavigation3/shared/build.gradle.kts):
+
+```kotlin
+room3 {
+    schemaDirectory(layout.projectDirectory.dir("schemas"))
+}
+```
+
+### 3. `Argument type mismatch ... Action<KspExtension> was expected`
+
+Do not write `ksp("...")` like a dependency string in Kotlin DSL configuration blocks. Use normal dependencies or KSP target lines like these in [shared/build.gradle.kts](/Users/abubakar/Downloads/RoomAndNavigation3/shared/build.gradle.kts):
+
+```kotlin
+add("kspAndroid", libs.room3.compiler)
+add("kspJvm", libs.room3.compiler)
+add("kspIosSimulatorArm64", libs.room3.compiler)
+add("kspIosArm64", libs.room3.compiler)
+add("kspJs", libs.room3.compiler)
+add("kspWasmJs", libs.room3.compiler)
+```
+
+### 4. `Cannot access 'androidx.room3.RoomDatabase'`
+
+This usually means the module using `AppDatabase` does not have the Room 3 runtime on its classpath through `shared`. Make sure [shared/build.gradle.kts](/Users/abubakar/Downloads/RoomAndNavigation3/shared/build.gradle.kts) has:
+
+```kotlin
+commonMain.dependencies {
+    api(libs.room3.runtime)
+}
+```
+
+### 5. `createDatabase()` is not found in web code
+
+Put the shared web database builder in:
+
+- [shared/src/webMain/kotlin/org/roomnav/project/CreateDatabase.kt](/Users/abubakar/Downloads/RoomAndNavigation3/shared/src/webMain/kotlin/org/roomnav/project/CreateDatabase.kt)
+
+and call it from:
+
+- [webApp/src/webMain/kotlin/org/roomnav/project/main.kt](/Users/abubakar/Downloads/RoomAndNavigation3/webApp/src/webMain/kotlin/org/roomnav/project/main.kt)
+
+The package name must match.
+
+### 6. `Expected class WebWorkerSQLiteDriver does not have default constructor`
+
+Do not instantiate the web driver in `webMain`. Keep only:
+
+```kotlin
+expect fun createWebWorkerDriver(): SQLiteDriver
+```
+
+in [shared/src/webMain/kotlin/org/roomnav/project/WebWorkerDriver.kt](/Users/abubakar/Downloads/RoomAndNavigation3/shared/src/webMain/kotlin/org/roomnav/project/WebWorkerDriver.kt), then create the actual driver separately in:
+
+- [shared/src/jsMain/kotlin/org/roomnav/project/WebWorkerDriver.js.kt](/Users/abubakar/Downloads/RoomAndNavigation3/shared/src/jsMain/kotlin/org/roomnav/project/WebWorkerDriver.js.kt)
+- [shared/src/wasmJsMain/kotlin/org/roomnav/project/WebWorkerDriver.wasmJs.kt](/Users/abubakar/Downloads/RoomAndNavigation3/shared/src/wasmJsMain/kotlin/org/roomnav/project/WebWorkerDriver.wasmJs.kt)
+
+### 7. `Module not found: Can't resolve 'sqlite-web-worker/worker.js'`
+
+The worker package must be available to the web bundle. Keep:
+
+- [sqliteWasmWorker/build.gradle.kts](/Users/abubakar/Downloads/RoomAndNavigation3/sqliteWasmWorker/build.gradle.kts)
+- [sqliteWasmWorker/worker/package.json](/Users/abubakar/Downloads/RoomAndNavigation3/sqliteWasmWorker/worker/package.json)
+- [webApp/build.gradle.kts](/Users/abubakar/Downloads/RoomAndNavigation3/webApp/build.gradle.kts)
+
+and keep the Wasm sync tasks in `webApp` so webpack can see the worker package.
+
+### 8. Web app builds but shows a white screen
+
+Check these three things:
+
+1. [webApp/src/webMain/resources/index.html](/Users/abubakar/Downloads/RoomAndNavigation3/webApp/src/webMain/resources/index.html) must include:
+
+```html
+<script src="webApp.js"></script>
+```
+
+2. [webApp/webpack.config.d/devserver-headers.js](/Users/abubakar/Downloads/RoomAndNavigation3/webApp/webpack.config.d/devserver-headers.js) must set:
+
+```js
+"Cross-Origin-Opener-Policy": "same-origin",
+"Cross-Origin-Embedder-Policy": "require-corp",
+```
+
+3. The worker fallback in [sqliteWasmWorker/worker/worker.js](/Users/abubakar/Downloads/RoomAndNavigation3/sqliteWasmWorker/worker/worker.js) should still handle browsers that do not expose `OpfsDb`.
+
 ## If You Want To Extend This Project
 
 Easy next steps:
@@ -662,4 +823,3 @@ Easy next steps:
 - add validation messages
 - split UI into smaller composables
 - add tests for DAO and repository
-
